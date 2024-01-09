@@ -78,13 +78,17 @@ def list_messages(service):
         response = service.messages().list(userId="me", labelIds=["INBOX"]).execute()
         for msg in response["messages"]:
             message = get_messages(service, msg["threadId"])
-            print(message[0])
+            for headers in message["payload"]["headers"]:
+                if headers["name"] == "From":
+                    email_sender = headers["value"]
+            print(message)
             current_message = {
                 "messages": {
                     "id": message["id"],
                     "threadId": message["threadId"],
                     "labelIds": message["labelIds"],
                     "message": message["snippet"],
+                    "from": email_sender,
                 },
                 "attachments": [],
             }
