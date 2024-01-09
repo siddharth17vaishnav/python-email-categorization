@@ -22,7 +22,6 @@ def extract_text_from_image(image_content):
         image_stream = io.BytesIO(image_data)
         image = Image.open(image_stream)
         text = pytesseract.image_to_string(image)
-        print(text)
         return text
     except Exception as e:
         print(f"Error performing OCR: {str(e)}")
