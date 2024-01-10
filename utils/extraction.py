@@ -4,6 +4,7 @@ import io
 from PIL import Image
 from pytesseract import pytesseract
 
+
 def extract_text_from_pdf(pdf_content):
     pdf_content = pdf_content.replace('-', '+').replace('_', '/')
     padded_data = pdf_content + '=' * ((4 - len(pdf_content) % 4) % 4)
