@@ -12,7 +12,7 @@ app = FastAPI()
 
 def get_authorization_url():
     flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
-    authorization_url, _ = flow.authorization_url(prompt="none")
+    authorization_url, _ = flow.authorization_url(prompt="consent")
     return authorization_url
 
 
@@ -139,14 +139,14 @@ async def authorize():
 
 
 @app.get("/oauth-callback")
-async def oauth_callback(code: str):
+async def oauth_callback(code):
     try:
-        credentials = authorize_and_get_credentials(code)
-        gmail_service = get_gmail_service(credentials)
-        result = list_messages(gmail_service)
+        # credentials = authorize_and_get_credentials(code)
+        # gmail_service = get_gmail_service(credentials)
+        # result = list_messages(gmail_service)
         return JSONResponse(
             content={
-                "data": result.get("messages"),
+                "data": [],
             }
         )
 
