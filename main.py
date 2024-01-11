@@ -1,26 +1,18 @@
-import json
 import re
-
-import openai
-import os
-
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from utils.extraction import extract_text_from_pdf, extract_text_from_image
+from utils.extraction import extract_text_from_pdf, extract_text_from_image, extract_links_from_html_part,extract_logo_from_html,get_html_content_from_message
 from contants import CLIENT_SECRETS_FILE, SCOPES, TOKEN_FILE, REDIRECT_URI
+from utils.open_ai import categorize_email
 
 app = FastAPI()
-os.environ["OPENAI_API_KEY"] = "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"
-
-openai.api_key = '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'
-
 
 
 def get_authorization_url():
     flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
-    authorization_url, _ = flow.authorization_url(prompt="consent")
+    authorization_url, _ = flow.authorization_url(prompt="none")
     return authorization_url
 
 
@@ -32,7 +24,7 @@ def authorize_and_get_credentials(code: str):
     credentials = flow.credentials
     with open(TOKEN_FILE, "w") as token_file:
         token_file.write(credentials.to_json())
-
+    print("cred",credentials)
     return credentials
 
 
@@ -80,7 +72,10 @@ def extract_attachments(service, message, message_id):
                     "extracted_text": data,
                 }
                 attachments.append(attachment_info)
-    return attachments
+    if len(attachments) > 0:
+        return attachments
+    else:
+        return None
 
 
 def remove_special_characters(input_string):
@@ -89,33 +84,9 @@ def remove_special_characters(input_string):
     return result_string
 
 
-# def generate_prompt(email_body):
-#     prompt = f"Email Body: {email_body}\n\nCategorize the email:"
-#     return prompt
-
-
-def gen(body, attachment, sender, date, subject):
-    prompt = f"Email Body: {body}\n\nAttachment: {attachment}\n\nSender: {sender}\n\nDate: {date}\n\nSubject: {subject}\n\nGenerate a response in the following format and return only valid data:\n\nRESPONSE =[\n  {{\n    \"Category\": \"Accounts\",\n    \"Email Type\": \"Updates\",\n    \"Email Use Case\": \"Account Creation\",\n    \"Description\",\n    \"Sender Data\": {{\n      \"Sender name (text)\": \"Sender1\",\n      \"Sender email domain (text)\": \"domain1.com\",\n      \"Sender icon (jpg)\": \"icon1.jpg\",\n      \"Time sent (mm/dd/yy 00:00)\": \"01/01/22 12:00\"\n    }},\n    \"Length of summary blurb\": \"150 characters or less\",\n    \"Unique Data Required\": \"Username or account ID (text)\"\n  }},\n  {{\n    \"Category\": \"Personal\",\n    \"Email Type\": \"Inbound (Unknown Sender)\",\n    \"Email Use Case\": \"Networking\",\n    \"Description\": \"An 'inbound' is an email from an unknown sender, typically looking to network, make a connection or solicit services.\",\n    \"Sender Data\": {{\n      \"Sender name (text)\": \"Unknown Sender\",\n      \"Sender email domain (text)\": \"\",\n      \"Sender icon (jpg)\": \"\",\n      \"Time sent (mm/dd/yy 00:00)\": \"\"\n    }},\n    \"Length of summary blurb\": \"150 characters or less\",\n    \"Unique Data Required\": extract the following data from the mail\n\nonly return the available data , if not available to return \"\"\n  }}\n]"
-    return prompt
-
-
-def categorize_email(prompt):
-    response = openai.ChatCompletion.create(
-        model='gpt-3.5-turbo',
-        messages=[
-            {"role": "user", "content": prompt}],
-        max_tokens=193,
-        temperature=0,
-    )
-    if response.choices[0]["message"]["content"] == "Uncategorized":
-        return "Miscellaneous"
-    return response.choices[0]["message"]["content"]
-
-
 def list_messages(service):
     try:
         result = []
-
         response = service.messages().list(userId="me", labelIds=["INBOX"]).execute()
         for msg in response["messages"]:
             message = get_messages(service, msg["threadId"])
@@ -126,10 +97,6 @@ def list_messages(service):
                     email_subject = headers["value"]
                 elif headers["name"] == "Date":
                     date = headers["value"]
-            # prompt = generate_prompt(message["snippet"])
-            # category = categorize_email(prompt)
-            res = gen(message["snippet"],[], email_sender,date,email_subject)
-            res1= categorize_email(res)
             current_message = {
                 "messages": {
                     "id": message["id"],
@@ -137,14 +104,21 @@ def list_messages(service):
                     "labelIds": message["labelIds"],
                     "message": message["snippet"],
                     "from": email_sender,
-                    # "category": category,
                     "subject": email_subject,
                     "date_and_time": date,
-                    "sender_mail": re.search(r'<(.*?)>', email_sender).group(1),
-                    "p":res1
+                    "sender_mail": re.search(r'<(.*?)>', email_sender).group(1)
                 },
                 "attachments": [],
             }
+            if "parts" in message["payload"]:
+                html_content = get_html_content_from_message(message)
+                links_from_html = extract_links_from_html_part(html_content)
+                logos_from_attachments = extract_logo_from_html(html_content)
+                res1 = categorize_email(message["snippet"], [], email_sender, email_subject, links_from_html)
+                current_message["messages"]["extracted_data"] = res1.get("result")
+                current_message["messages"]["category"] = res1["category"]
+                current_message["messages"]["extracted_data"]["links"] = links_from_html
+                current_message["messages"]["extracted_data"]["sender_icon"] = logos_from_attachments
             attachments = extract_attachments(service, message, msg["id"])
             current_message["attachments"] = attachments
             result.append(current_message)
